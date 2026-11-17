@@ -15,7 +15,7 @@ whatever had focus. Two independent implementations:
 |---|---|---|
 | Language | Swift 6 | C# / .NET 10 |
 | UI | SwiftUI | Avalonia |
-| Speech | Apple `SpeechAnalyzer`, or Parakeet via FluidAudio | Parakeet via sherpa-onnx |
+| Speech | Parakeet via FluidAudio | Parakeet via sherpa-onnx |
 | Location | repo root | `windows/` |
 
 **The macOS app works and is in daily use.**
@@ -38,7 +38,7 @@ a failing vector without changing the other is how the two silently diverge — 
 of them can be exercised by hand.
 
 ```bash
-swift test --filter VectorTests                    # macOS side
+make test                                          # macOS side
 cd windows && dotnet test Murmur.CrossPlatform.slnf # Windows side, runs anywhere
 ```
 
@@ -64,40 +64,38 @@ iCloud-synced folder and the sync engine touches files mid-compile. **Always bui
 writes a `.build/` directory into iCloud, which makes every subsequent build minutes slower.
 If you see this error, wait a few seconds and retry.
 
-**Compare mode doesn't type anything.** By design — `Settings.compareMode` runs every engine
-on one recording and shows them side by side. If both injected, two transcripts would fight
-over one text field. This is the single most confusing behaviour in the app.
+**`swift test` fails on this machine with "plugin for module 'TestingMacros' not found".**
+Only the Command Line Tools are installed, and they ship Swift Testing's macro plugin and
+runtime in directories SwiftPM doesn't search. `make test` passes the paths; use it.
 
-**The timing column isn't comparing like with like.** Apple and Parakeet are timed on local
-compute with the clock started *after* model load. Wispr Flow's number is its own
-`e2eLatency`, which includes a network round trip and its cleanup pass. Don't present them
-as one ranking.
+**A quick tap of fn does nothing.** By design — `PushToTalkGesture` (in `MurmurCore`) starts
+recording on the press but discards a lone tap, and cancels when fn is used as a modifier
+(fn+arrow). Double-tap locks hands-free. Pure logic, tested; change it there, not in the tap.
 
 **`MainActor.assumeIsolated` will crash the process.** It does not check the claim, it
 asserts it. Use `await MainActor.run` from any non-main-actor context. This took the app
 down once already.
 
-**Mutating `@State` inside a `Canvas` draw closure floods the log and corrupts state.** The
-VU meter keeps its needle physics in a plain reference type the view merely holds, which is
-invisible to SwiftUI's state graph. Don't "clean that up" into `@State`.
+**Mutating `@State` inside a `Canvas` draw closure floods the log and corrupts state.** Keep
+per-frame state in a plain reference type the view merely holds, which is invisible to
+SwiftUI's state graph.
 
 ---
 
 ## Design system
 
-`Sources/MurmurYouTube/UI/DesignSystem.swift` defines every colour, size, radius, duration
-and material token. **Views must not contain literal values.** If a component needs a number
+`Sources/Murmur/UI/DesignSystem.swift` defines every colour, font, size, radius and
+duration token; shared pieces (cards, buttons, search field) are in `Components.swift`. **Views must not contain literal values.** If a component needs a number
 that isn't a token, add the token rather than inlining it.
 
-The direction is 1980s field recorders — Sony TC-D5, Marantz PMD, Nakamichi, Braun. Silver
-face in light appearance, black face in dark. Two rules that are not negotiable:
+The direction is a quiet, modern Mac app in the vein of Wispr Flow: a sidebar on the window
+background, the selected page as one large rounded card beside it, neutral greys, and the
+system serif for headlines and stats. Settings and the dictionary editor use native controls.
+Rules that are not negotiable:
 
 - **Red means recording.** Nothing else in the app is red.
-- **Amber and green are instrumentation only** — level meters, never UI chrome.
-
-Explicitly ruled out: neon, vaporwave, synthwave, purple/pink gradients, glowing text, chrome
-lettering, grid horizons. There are **no gradients anywhere**; depth comes from flat panels,
-hairline bevels and procedurally-drawn brushed grain.
+- **No gradients and no glow.** Depth comes from a lighter surface and a hairline border.
+- **Ink is the only emphasis colour.** Primary buttons are ink-filled, not tinted.
 
 ---
 
@@ -112,7 +110,7 @@ shows as **on** while the app is untrusted. The `Makefile` auto-detects a Develo
 If a grant does get wedged, reset that one row — never toggle, and never omit the bundle ID:
 
 ```bash
-tccutil reset Accessibility ai.pivotstudio.murmur-youtube
+tccutil reset Accessibility ai.pivotstudio.murmur
 ```
 
 A bare `tccutil reset Accessibility` wipes every app on the machine. Then quit System

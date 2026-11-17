@@ -1,4 +1,4 @@
-EXEC     := MurmurYouTube
+EXEC     := Murmur
 CONFIG   := debug
 
 ## Build products live OUTSIDE this directory, for the same reason the .app does.
@@ -7,7 +7,7 @@ CONFIG   := debug
 ## .build while the compiler is using them — producing "input file was modified during
 ## the build" on random object files, and occasionally a wedged swift-frontend stuck at
 ## 0% CPU. Moving the scratch path to ~/Library/Caches (never synced) removes the race.
-SCRATCH  := $(HOME)/Library/Caches/MurmurYouTubeBuild/scratch
+SCRATCH  := $(HOME)/Library/Caches/MurmurBuild/scratch
 BUILD    := $(SCRATCH)/$(CONFIG)/$(EXEC)
 
 ## The bundle is assembled and signed OUTSIDE this directory on purpose.
@@ -17,8 +17,8 @@ BUILD    := $(SCRATCH)/$(CONFIG)/$(EXEC)
 ## and codesign hard-refuses anything carrying them ("resource fork, Finder information,
 ## or similar detritus not allowed"). `xattr -cr` immediately before signing is not enough
 ## — the provider re-stamps in between. Staging in ~/Library/Caches sidesteps it entirely.
-STAGE    := $(HOME)/Library/Caches/MurmurYouTubeBuild
-APPNAME  := Murmur YouTube.app
+STAGE    := $(HOME)/Library/Caches/MurmurBuild
+APPNAME  := Murmur.app
 BUNDLE   := $(STAGE)/$(APPNAME)
 CONTENTS := $(BUNDLE)/Contents
 
@@ -32,12 +32,37 @@ ifeq ($(strip $(SIGN_ID)),)
 SIGN_ID := -
 endif
 
-.PHONY: all build app run install clean icon
+## The macOS 27 SDK turned SwiftUI's @State into a macro, and the compiler plugin that
+## expands it (libSwiftUIMacros) ships with Xcode but not with the Command Line Tools. On a
+## CLT-only machine every @State fails with "plugin for module 'SwiftUIMacros' not found".
+## Fall back to the macOS 26 SDK there — @State is still a plain property wrapper in it, and
+## the package targets macOS 26 anyway. With Xcode selected, nothing changes.
+DEVDIR := $(shell xcode-select -p 2>/dev/null)
+ifneq ($(findstring CommandLineTools,$(DEVDIR)),)
+ifeq ($(wildcard $(DEVDIR)/usr/lib/swift/host/plugins/libSwiftUIMacros.dylib),)
+ifneq ($(wildcard $(DEVDIR)/SDKs/MacOSX26.sdk),)
+export SDKROOT := $(DEVDIR)/SDKs/MacOSX26.sdk
+endif
+endif
+endif
+
+## Swift Testing on a CLT-only machine: its macro plugin and runtime libraries ship in
+## directories SwiftPM doesn't search, so the tests fail to compile, then fail to load.
+ifneq ($(findstring CommandLineTools,$(DEVDIR)),)
+TEST_FLAGS := -Xswiftc -plugin-path -Xswiftc $(DEVDIR)/usr/lib/swift/host/plugins/testing \
+              -Xlinker -rpath -Xlinker $(DEVDIR)/Library/Developer/Frameworks \
+              -Xlinker -rpath -Xlinker $(DEVDIR)/Library/Developer/usr/lib
+endif
+
+.PHONY: all build test app run install clean icon
 
 all: app
 
 build:
 	swift build -c $(CONFIG) --scratch-path "$(SCRATCH)"
+
+test:
+	swift test --scratch-path "$(SCRATCH)" $(TEST_FLAGS)
 
 ## Regenerates AppIcon.icns from Tools/makeicon.swift. Not a dependency of `app` — the
 ## icon rarely changes and rendering 10 PNGs on every build is wasted time.
@@ -65,7 +90,6 @@ app: build
 		"$(BUNDLE)"
 	@echo "built $(BUNDLE)  [signed: $(SIGN_ID)]"
 
-## Only ever targets the MurmurYouTube executable — never the separate `murmur` app.
 run: app
 	@pkill -x $(EXEC) 2>/dev/null || true
 	@open "$(BUNDLE)"
